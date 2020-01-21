@@ -21,6 +21,7 @@ public class GroovyScriptInvocationProxy implements InvocationHandler {
         String methodName = method.getName();
         Class<?>[] parameterTypes = method.getParameterTypes();
 
+        // 如果是Object的基本方法或重载方法，特殊处理
         if (method.getDeclaringClass() == Object.class) {
             return method.invoke(script, args);
         }
@@ -33,7 +34,7 @@ public class GroovyScriptInvocationProxy implements InvocationHandler {
         if ("equals".equals(methodName) && parameterTypes.length == 1) {
             return script.equals(args[0]);
         }
-
+        // 运行脚本
         return script.run();
     }
 }

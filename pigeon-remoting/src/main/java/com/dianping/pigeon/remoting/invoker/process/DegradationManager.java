@@ -142,7 +142,9 @@ public enum DegradationManager {
 	}
 
 	static {
+		// 启动定时任务
 		checkThreadPool.execute(new Checker());
+		// 读取配置
 		String degradeCustomizedExceptionConfig = ConfigManagerLoader.getConfigManager()
 				.getStringValue(KEY_DEGRADE_CUSTOMIZED_EXCEPTION, "");
 		parseDegradeCustomizedExceptions(degradeCustomizedExceptionConfig);
@@ -154,21 +156,30 @@ public enum DegradationManager {
 	}
 
 	public boolean needDegrade(InvokerContext context) {
+		// 请求的服务方法开启降级
 		if (degradationIsEnable(context)) {
+			// CASE1:强制降级
 			if (isForceDegrade) {
 				return true;
 			}
 
+			// CASE2:自动降级
 			if (isAutoDegrade) {
 				if (!CollectionUtils.isEmpty(requestCountMap)) {
+					// 查询服务方法的请求情况统计值
 					String requestUrl = getRequestUrl(context);
 					Count count = requestCountMap.get(requestUrl);
 					if (count != null) {
+						// 条件1：总请求数>=100 【小流量情形】
 						if (count.getTotalValue() >= degradeTotalThreshold) {
+							// 条件2：真正发到服务端的请求数>2 AND 这些请求的失败率<1% 【失败率低的情形】
 							if ((count.getTotalValue() - count.getDegradedValue()) > degradeInvokeThreshold
 									&& count.getFailedPercent() < degradeRecoverPercent) {
+								/*** 减少需要降级的请求数（相对当前降级率而言，少10%）***/
 								return random(count.getDegradedPercent() - degradeRecoverInterval);
+								// 条件3：失败率>=1%  【失败率高的情形】
 							} else if (count.getFailedPercent() >= degradeRecoverPercent) {
+								/*** 将99.9%的请求进行降级 ***/
 								return random(degradePercentMax);
 							}
 						}
@@ -176,6 +187,7 @@ public enum DegradationManager {
 				}
 			}
 
+			// CASE3:失败降级
 			if (isFailureDegrade) {
 				return false;
 			}
@@ -457,6 +469,7 @@ public enum DegradationManager {
 
 		private void checkRequestSecondCount() {
 			Map<String, Count> countMap = new ConcurrentHashMap<String, Count>();
+			// 自动降级时，统计的时间窗口，默认10s
 			final int recentSeconds = degradeCheckSeconds;
 			final int currentSecond = Calendar.getInstance().get(Calendar.SECOND);
 
@@ -468,13 +481,15 @@ public enum DegradationManager {
 					prevSec = prevSec >= 0 ? prevSec : prevSec + 60;
 					Count ct = secondCount.get(prevSec);
 					if (ct != null) {
+						// 将时间窗口内的每秒计数值进行聚合
 						total += ct.getTotalValue();
 						failed += ct.getFailedValue();
 						degraded += ct.getDegradedValue();
 					}
 				}
+				// 放入聚合结果Map
 				countMap.put(url, new Count(total, failed, degraded));
-				// clear previous seconds
+				// 重置requestSecondCountMap中的秒级计数器
 				for (int i = recentSeconds + 1; i <= recentSeconds + 20; i++) {
 					int prevSec = currentSecond - i;
 					prevSec = prevSec >= 0 ? prevSec : prevSec + 60;

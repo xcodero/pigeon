@@ -99,6 +99,8 @@ public class DegradationFilter extends InvocationInvokeFilter {
     private static void parseDegradeMethodsConfig(String degradeMethodsConfig) throws Throwable {
         if (StringUtils.isNotBlank(degradeMethodsConfig)) {
             ConcurrentHashMap<String, DegradeAction> map = new ConcurrentHashMap<String, DegradeAction>();
+            // 格式如"key1=value1,key2=value2"，其中key为{url}#{methodName}
+            // 可以从配置"pigeon.invoker.degrade.method.return.{valueN}"中获取具体方法的DegradeActionConfig数据
             String[] pairArray = degradeMethodsConfig.split(",");
             for (String str : pairArray) {
                 if (StringUtils.isNotBlank(str)) {
@@ -107,9 +109,11 @@ public class DegradationFilter extends InvocationInvokeFilter {
                         String key = pair[1].trim();
                         DegradeAction degradeAction = new DegradeAction();
                         if (StringUtils.isNotBlank(key)) {
+                            // 获取服务方法对应的DegradeActionConfig，用来初始化DegradeAction对象
                             String config = configManager.getStringValue(KEY_DEGRADE_METHOD + key);
 
                             if (StringUtils.isNotBlank(config)) {
+                                // 反序列化为degradeActionConfig实例
                                 config = config.trim();
                                 config = "{\"@class\":\"" + DegradeActionConfig.class.getName() + "\","
                                         + config.substring(1);
@@ -117,6 +121,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
                                 DegradeActionConfig degradeActionConfig = (DegradeActionConfig) jacksonSerializer
                                         .toObject(DegradeActionConfig.class, config);
 
+                                // 初始化degradeAction对象
                                 degradeAction.setUseMockClass(degradeActionConfig.getUseMockClass());
                                 degradeAction.setUseGroovyScript(degradeActionConfig.getUseGroovyScript());
                                 degradeAction.setThrowException(degradeActionConfig.getThrowException());
@@ -124,12 +129,14 @@ public class DegradationFilter extends InvocationInvokeFilter {
                                 String content = degradeActionConfig.getContent();
                                 Object returnObj = null;
 
+                                // 解析具体的降级方案
                                 if (degradeAction.isUseMockClass()) {
                                     // use mock class
                                 } else if (degradeAction.isUseGroovyScript()) {
                                     degradeAction.setGroovyScript(GroovyUtils.getScript(content));
                                 } else if (degradeAction.isThrowException()) {
                                     if (StringUtils.isNotBlank(degradeActionConfig.getReturnClass())) {
+                                        // 反序列化为指定异常实例
                                         returnObj = jacksonSerializer
                                                 .toObject(Class.forName(degradeActionConfig.getReturnClass()), content);
                                         if (!(returnObj instanceof Exception)) {
@@ -141,15 +148,18 @@ public class DegradationFilter extends InvocationInvokeFilter {
                                 } else {
                                     if (StringUtils.isNotBlank(degradeActionConfig.getKeyClass())
                                             && StringUtils.isNotBlank(degradeActionConfig.getValueClass())) {
+                                        // 反序列化为Map对象
                                         returnObj = jacksonSerializer.deserializeMap(content,
                                                 Class.forName(degradeActionConfig.getReturnClass()),
                                                 Class.forName(degradeActionConfig.getKeyClass()),
                                                 Class.forName(degradeActionConfig.getValueClass()));
                                     } else if (StringUtils.isNotBlank(degradeActionConfig.getComponentClass())) {
+                                        // 反序列化为Collection对象
                                         returnObj = jacksonSerializer.deserializeCollection(content,
                                                 Class.forName(degradeActionConfig.getReturnClass()),
                                                 Class.forName(degradeActionConfig.getComponentClass()));
                                     } else if (StringUtils.isNotBlank(degradeActionConfig.getReturnClass())) {
+                                        // 反序列为普通java对象
                                         returnObj = jacksonSerializer
                                                 .toObject(Class.forName(degradeActionConfig.getReturnClass()), content);
                                     }
@@ -162,7 +172,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
                 }
             }
             degradeMethodActions.clear();
-            degradeMethodActions = map;
+            degradeMethodActions = map; // 更新缓存
         } else {
             degradeMethodActions.clear();
         }
@@ -178,7 +188,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
         if (DegradationManager.INSTANCE.needDegrade(context)) {
             degradeResponse = degradeCall(context);
 
-            if (degradeResponse != null) {// 返回自动降级熔断的降级结果
+            if (degradeResponse != null) { // 返回自动降级熔断的降级结果
                 return degradeResponse;
             }
         }
@@ -199,11 +209,12 @@ public class DegradationFilter extends InvocationInvokeFilter {
                         failed = true;
                         failedException = rpcException;
                         if (DegradationManager.INSTANCE.needFailureDegrade(context)) {
+                            // 对于自动降级、失败降级，请求服务端失败则置为true
                             context.getDegradeInfo().setFailureDegrade(true);
                             context.getDegradeInfo().setCause(rpcException);
                             degradeResponse = degradeCall(context);
 
-                            if (degradeResponse != null) {// 返回同步调用模式的失败降级结果
+                            if (degradeResponse != null) { // 返回同步调用模式的失败降级结果
                                 return degradeResponse;
                             }
                         }
@@ -220,7 +231,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
                             context.getDegradeInfo().setCause(exception);
                             degradeResponse = degradeCall(context);
 
-                            if (degradeResponse != null) {// 返回同步调用模式的失败降级结果
+                            if (degradeResponse != null) { // 返回同步调用模式的失败降级结果
                                 return degradeResponse;
                             }
                         }
@@ -236,6 +247,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
                 if (failed) {
                     DegradationManager.INSTANCE.addFailedRequest(context, failedException);
                 } else {
+                    // 自动降级放行的请求、失败降级，请求成功时：here
                     DegradationManager.INSTANCE.addNormalRequest(context);
                 }
             }
@@ -255,6 +267,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
                 }
             }
 
+            // 自动降级放行的请求、失败降级，请求失败时：here
             DegradationManager.INSTANCE.addFailedRequest(context, e);
             throw e;
         } finally {
@@ -272,9 +285,11 @@ public class DegradationFilter extends InvocationInvokeFilter {
                 monitorData.degrade();
             }
 
+            // 自动降级放行的请求、失败降级，请求失败时：here
             if (context.getDegradeInfo().isFailureDegrade()) {
                 DegradationManager.INSTANCE.addFailedRequest(context, new ServiceFailureDegreadedException());
             } else {
+                // 强制降级、自动降级拦截的请求：here
                 DegradationManager.INSTANCE.addDegradedRequest(context, null);
             }
 
@@ -304,7 +319,9 @@ public class DegradationFilter extends InvocationInvokeFilter {
             monitorData.add();
         }
 
+        // 线程内设置的默认结果，类似缓存
         Object defaultResult = InvokerHelper.getDefaultResult();
+        // 获取服务方法配置的降级方案
         String key = DegradationManager.INSTANCE.getRequestUrl(context);
         DegradeAction action = degradeMethodActions.get(key);
 
@@ -315,22 +332,26 @@ public class DegradationFilter extends InvocationInvokeFilter {
         switch (callMethod) {
             case SYNC:
                 try {
+                    // 线程内存在默认结果，返回它
                     if (defaultResult != null) {
                         response = InvokerUtils.createDefaultResponse(defaultResult);
                     } else if (action != null) {
                         if (action.isUseMockClass()) {
                             Object mockObj = context.getInvokerConfig().getMock();
                             if (mockObj != null) {
+                                // 反射调用配置的mock对象的方法，将方法执行结果作为降级响应
                                 defaultResult = new MockProxyWrapper(mockObj).invoke(context.getMethodName(),
-                                        context.getParameterTypes(), context.getArguments());
+                                        context.getParameterTypes(), context.getArguments()); // 用Wrapper隐藏了反射调用的异常处理
                                 response = InvokerUtils.createDefaultResponse(defaultResult);
                             }
                         } else if (action.isUseGroovyScript()) {
+                            // 传入groovy脚本会生成相应的Script对象，此处通过代理对Script对象进行包装，反射调用代理方法从而执行脚本，将脚本执行结果作为降级响应
                             defaultResult = new MockProxyWrapper(getGroovyMockProxy(key, context, action))
                                     .invoke(context.getMethodName(), context.getParameterTypes(), context.getArguments());
                             response = InvokerUtils.createDefaultResponse(defaultResult);
                         } else if (action.isThrowException()) {
                             Exception exception;
+                            // 如果配置了异常类型，则返回指定异常的实例，否则返回ServiceDegradedException的实例
                             if (action.getReturnObj() == null) {
                                 exception = new ServiceDegradedException(key);
                             } else {
@@ -338,6 +359,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
                             }
                             throw exception;
                         } else {
+                            // 降级配置中的默认结果作为降级响应
                             defaultResult = action.getReturnObj();
                             response = InvokerUtils.createDefaultResponse(defaultResult);
                         }
@@ -347,12 +369,14 @@ public class DegradationFilter extends InvocationInvokeFilter {
                     response.setMessageType(Constants.MESSAGE_TYPE_SERVICE_EXCEPTION);
                 } finally {
                     if (response != null) {
+                        // 标志为是降级响应，不是服务端的实际响应
                         context.getDegradeInfo().setDegrade(true);
                         addCurrentTimeData(timeout);
                     }
                 }
                 break;
             case CALLBACK:
+                // 实现原理类似与SYNC，只是用callBack进行了一层封装
                 try {
                     if (defaultResult != null) {
                         response = callBackOnSuccess(context, defaultResult);
@@ -401,6 +425,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
                 }
                 break;
             case FUTURE:
+                // 实现原理类似与SYNC，只是用future进行了一层封装
                 if (defaultResult != null) {
                     DegradeServiceFuture future = new DegradeServiceFuture(context, timeout);
                     FutureFactory.setFuture(future);
@@ -452,6 +477,7 @@ public class DegradationFilter extends InvocationInvokeFilter {
                 }
                 break;
             case ONEWAY:
+                // "不关心结果"的调用方式，返回"无结果"响应
                 context.getDegradeInfo().setDegrade(true);
                 addCurrentTimeData(timeout);
                 response = NO_RETURN_RESPONSE;
